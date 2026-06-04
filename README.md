@@ -61,13 +61,9 @@ Después abrí:
 http://localhost:4317
 ```
 
-La UI lista los proyectos con logs, permite alternar entre timeline y eventos crudos, filtrar texto y refrescar automáticamente.
+La UI lista los proyectos con logs, muestra subagentes activos, ejecuciones recientes y un panel de detalle por ejecución. También mantiene timeline y eventos crudos como vistas de debug.
 
-También muestra un resumen de actividad con:
-
-- modelo detectado;
-- agente o subagente detectado;
-- última acción u objetivo registrado.
+El estado canónico del monitor sale de `subagent-runs.ndjson` a través de las APIs `/runs`; el timeline legible no se parsea para inferir estado, duración ni sesiones.
 
 Por seguridad, el servidor escucha solo en `127.0.0.1`, no en toda la red local.
 
@@ -97,6 +93,7 @@ Por seguridad, el servidor escucha solo en `127.0.0.1`, no en toda la red local.
 
 | Archivo | Para qué sirve |
 |---------|----------------|
+| `logs/<proyecto>-<hash>/subagent-runs.ndjson` | Contrato estructurado del monitor. Cada línea representa un registro `subagent.run` con estado, sesiones, agente, modelo cuando exista, tiempos, resultado y uso opcional. |
 | `logs/<proyecto>-<hash>/subagent-timeline.md` | Línea de tiempo legible: inicio del observer, llamadas a herramientas y eventos relacionados con tareas/subagentes. |
 | `logs/<proyecto>-<hash>/opencode-events.ndjson` | Registro estructurado crudo para depurar con más detalle. Cada línea es un objeto JSON. |
 
@@ -106,7 +103,33 @@ El timeline intenta registrar líneas más explicativas, por ejemplo:
 before | delegation/tool: task | agent: sdd-verify-smart-profiles | model: openai/gpt-5.5 | does: Verify implementation against specs
 ```
 
-Si opencode no expone el modelo o el agente en ese evento específico, la UI muestra `Sin datos todavía` hasta encontrar una línea que sí lo incluya.
+Si opencode no expone modelo, uso de tokens o contexto para una ejecución, el registro sigue siendo válido y la UI muestra `No disponible` en vez de inventar datos.
+
+## APIs locales
+
+El servidor expone endpoints sin caché para que la UI y futuros consumidores lean el mismo contrato normalizado:
+
+| Endpoint | Uso |
+|----------|-----|
+| `GET /api/projects` | Lista proyectos con logs y su última actividad. |
+| `GET /api/projects/:project/runs?status=active&limit=50` | Devuelve ejecuciones activas desde `subagent-runs.ndjson`. |
+| `GET /api/projects/:project/runs?status=recent&limit=50` | Devuelve ejecuciones terminales recientes: completadas, fallidas, canceladas, timeout o desconocidas. |
+| `GET /api/projects/:project/runs?status=all&limit=50` | Devuelve todas las ejecuciones normalizadas. |
+| `GET /api/projects/:project/runs/:key` | Busca un detalle por clave normalizada, delegation ID, sesión padre o sesión hija. |
+| `GET /api/projects/:project/timeline` | Fallback/debug del timeline legible. No es fuente canónica del monitor. |
+| `GET /api/projects/:project/events` | Fallback/debug de eventos crudos. No es fuente canónica del monitor. |
+
+### Metadata opcional
+
+Los campos como `model`, `usage.inputTokens`, `usage.outputTokens` y `usage.contextPercent` dependen de lo que opencode exponga en sus hooks. Cuando no están disponibles:
+
+- el plugin puede omitirlos o dejarlos como `null`;
+- la API normaliza valores faltantes como desconocidos/no disponibles;
+- la UI conserva la ejecución visible y muestra etiquetas explícitas.
+
+### Fallback crudo
+
+Si todavía no existe `subagent-runs.ndjson` para un proyecto, las APIs de runs devuelven listas vacías. En ese caso, el panel de debug crudo sigue permitiendo inspeccionar `subagent-timeline.md` y `opencode-events.ndjson` manualmente.
 
 ## Archivos principales
 
@@ -118,8 +141,8 @@ Si opencode no expone el modelo o el agente en ese evento específico, la UI mue
 | `.env.example` | Variables configurables sin hardcodear rutas locales. |
 | `server.js` | Servidor local que expone los logs a la UI. |
 | `public/index.html` | Estructura de la pantalla. |
-| `public/app.js` | Lógica de carga, filtrado y auto-refresh. |
-| `public/styles.css` | Estilos de la UI. |
+| `public/app.js` | Lógica de carga de runs, detalle, copiado de sesiones, debug crudo y auto-refresh. |
+| `public/styles.css` | Estilos del monitor, chips de estado, layout responsive y foco visible. |
 
 ## Por qué esto ayuda
 

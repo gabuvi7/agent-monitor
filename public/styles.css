@@ -9,6 +9,12 @@
   --accent: #72e1a1;
   --accent-strong: #3ccf7d;
   --danger: #ff7b7b;
+  --warning: #ffd166;
+  --info: #8ec5ff;
+  --success-bg: #102d1e;
+  --danger-bg: #331719;
+  --warning-bg: #30260f;
+  --info-bg: #102437;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -40,6 +46,11 @@ button,
   text-decoration: none;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 button:hover,
 .docs-link:hover,
 button[aria-pressed="true"] {
@@ -52,6 +63,24 @@ a:focus-visible,
 input:focus-visible {
   outline: 3px solid var(--accent-strong);
   outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: 1rem;
+  inset-inline-start: 1rem;
+  z-index: 10;
+  border-radius: 0.75rem;
+  background: var(--accent-strong);
+  color: #06100a;
+  font-weight: 700;
+  padding: 0.65rem 0.9rem;
+  text-decoration: none;
+  transform: translateY(-150%);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
 }
 
 .app-header {
@@ -117,14 +146,17 @@ h3 {
 .panel-heading,
 .logs-heading,
 .actions,
-.tabs {
+.tabs,
+.section-heading,
+.detail-actions {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
 .panel-heading,
-.logs-heading {
+.logs-heading,
+.section-heading {
   justify-content: space-between;
 }
 
@@ -213,6 +245,169 @@ h3 {
   margin: 0.75rem 0;
 }
 
+.monitor-grid {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) minmax(18rem, 1.2fr);
+  gap: 1rem;
+}
+
+.run-column,
+.run-detail,
+.debug-panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: #10131a;
+  padding: 1rem;
+}
+
+.run-column:first-child {
+  grid-row: span 2;
+}
+
+.debug-panel {
+  margin-top: 1rem;
+}
+
+.debug-heading {
+  align-items: flex-start;
+}
+
+.run-list {
+  display: grid;
+  gap: 0.65rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.recent-list {
+  max-height: 28rem;
+  overflow: auto;
+  padding-inline-end: 0.25rem;
+  content-visibility: auto;
+  contain-intrinsic-size: 24rem;
+}
+
+.run-card {
+  display: grid;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.85rem;
+  text-align: start;
+}
+
+.run-card[aria-current="true"],
+.project-button[aria-current="page"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.run-card-header,
+.detail-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.run-title,
+.detail-title {
+  overflow-wrap: anywhere;
+}
+
+.run-card-meta {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.status-chip,
+.count-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.35rem 0.55rem;
+  white-space: nowrap;
+}
+
+.status-running {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.status-completed {
+  background: var(--success-bg);
+  color: var(--accent);
+}
+
+.status-failed,
+.status-timeout {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.status-cancelled,
+.status-unknown {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.count-chip {
+  color: var(--muted);
+}
+
+.detail-card {
+  display: grid;
+  gap: 1rem;
+  min-height: 12rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.detail-grid div {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: #0b0d12;
+  padding: 0.65rem;
+}
+
+.detail-grid dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 0.2rem;
+}
+
+.detail-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-actions {
+  flex-wrap: wrap;
+}
+
+.copy-button {
+  padding: 0.45rem 0.65rem;
+}
+
+.empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 0.85rem;
+  color: var(--muted);
+  padding: 0.85rem;
+}
+
 .log-output {
   min-height: 32rem;
   max-height: calc(100vh - 20rem);
@@ -242,10 +437,21 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .monitor-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
   .logs-heading,
-  .app-header {
+  .app-header,
+  .debug-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .actions,
+  .tabs {
+    flex-wrap: wrap;
   }
 }
 
