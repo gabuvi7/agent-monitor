@@ -1,14 +1,48 @@
-# Laboratorio global de subagentes de opencode
+# Agent Monitor
 
 Este proyecto centraliza los logs del plugin global de opencode que permite ver qué pasa cuando opencode delega trabajo a subagentes.
 
 El plugin está instalado globalmente en:
 
 ```text
-/Users/guviedo/.config/opencode/plugins/subagent-tracer.ts
+~/.config/opencode/plugins/subagent-tracer.ts
 ```
 
-Eso significa que se carga cuando abrís opencode desde cualquier proyecto.
+La fuente versionada vive en este repo:
+
+```text
+src/opencode/plugins/subagent-tracer.ts
+```
+
+Para instalar o sincronizar el plugin global:
+
+```bash
+npm run install-plugin
+```
+
+El instalador también escribe la configuración runtime en:
+
+```text
+~/.config/agent-monitor/.env
+```
+
+Después de instalarlo, cerrá y volvé a abrir opencode. Los plugins se cargan al inicio.
+
+### Configuración opcional
+
+Podés crear un `.env` local a partir del ejemplo:
+
+```bash
+cp .env.example .env
+```
+
+Variables disponibles:
+
+| Variable | Para qué sirve | Default |
+|----------|----------------|---------|
+| `AGENT_MONITOR_LOG_ROOT` | Carpeta donde el plugin escribe logs y la UI los lee. | `./logs` |
+| `AGENT_MONITOR_PLUGIN_TARGET` | Destino donde se instala la copia global del plugin. | `~/.config/opencode/plugins/subagent-tracer.ts` |
+| `AGENT_MONITOR_RUNTIME_ENV` | `.env` runtime que lee el plugin global. | `~/.config/agent-monitor/.env` |
 
 ## Uso rápido
 
@@ -17,7 +51,7 @@ Eso significa que se carga cuando abrís opencode desde cualquier proyecto.
 Desde este proyecto:
 
 ```bash
-cd /Users/guviedo/things/opencode-subagent-lab
+cd /path/to/agent-monitor
 npm start
 ```
 
@@ -55,8 +89,8 @@ Por seguridad, el servidor escucha solo en `127.0.0.1`, no en toda la red local.
 3. Mientras el subagente trabaja, mirá los logs desde otra terminal. Los logs se guardan por proyecto:
 
    ```bash
-   tail -f /Users/guviedo/things/opencode-subagent-lab/logs/<nombre-del-proyecto>-<hash>/subagent-timeline.md
-   tail -f /Users/guviedo/things/opencode-subagent-lab/logs/<nombre-del-proyecto>-<hash>/opencode-events.ndjson
+   tail -f logs/<nombre-del-proyecto>-<hash>/subagent-timeline.md
+   tail -f logs/<nombre-del-proyecto>-<hash>/opencode-events.ndjson
    ```
 
 ## Qué se registra
@@ -78,7 +112,10 @@ Si opencode no expone el modelo o el agente en ese evento específico, la UI mue
 
 | Archivo | Rol |
 |---------|-----|
-| `/Users/guviedo/.config/opencode/plugins/subagent-tracer.ts` | Plugin global que captura eventos de opencode. |
+| `src/opencode/plugins/subagent-tracer.ts` | Fuente versionada del plugin que captura eventos de opencode. |
+| `scripts/install-opencode-plugin.js` | Script que instala/sincroniza el plugin en `~/.config/opencode/plugins`. |
+| `~/.config/opencode/plugins/subagent-tracer.ts` | Copia global que opencode carga al iniciar. No editar a mano. |
+| `.env.example` | Variables configurables sin hardcodear rutas locales. |
 | `server.js` | Servidor local que expone los logs a la UI. |
 | `public/index.html` | Estructura de la pantalla. |
 | `public/app.js` | Lógica de carga, filtrado y auto-refresh. |
@@ -90,7 +127,7 @@ Cuando opencode muestra algo como `view subagents`, el subagente puede estar hac
 
 ## Notas importantes
 
-- opencode carga plugins y configuración solo al iniciar. Si editás el plugin global, cerrá y volvé a abrir opencode.
+- opencode carga plugins y configuración solo al iniciar. Si corrés `npm run install-plugin`, cerrá y volvé a abrir opencode.
 - Los logs pueden contener rutas de archivos, prompts, argumentos de comandos y fragmentos de salidas. No los subas a un repo si incluyen información privada.
 - El plugin recorta strings largos para que los logs sigan siendo manejables.
 

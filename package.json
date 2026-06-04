@@ -1,9 +1,10 @@
 {
-  "name": "opencode-subagent-lab",
+  "name": "agent-monitor",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "install-plugin": "node scripts/install-opencode-plugin.js",
     "start": "node server.js"
   }
 }
