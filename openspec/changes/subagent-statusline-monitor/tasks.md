@@ -45,13 +45,13 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Web Monitor
 
-- [ ] 3.1 Update `public/index.html` with active runs, recent runs, run detail, and raw debug tab regions using semantic landmarks and buttons.
-- [ ] 3.2 Update `public/app.js` to fetch run APIs, render cards/details with `textContent`, copy session IDs, and stop deriving canonical state from timeline regex.
-- [ ] 3.3 Update `public/styles.css` with status chips, dense master/detail layout, visible focus, responsive behavior, and reduced-motion-safe refreshes.
-- [ ] 3.4 Update `README.md` to document `subagent-runs.ndjson`, endpoints, optional metadata, and raw log fallback.
+- [x] 3.1 Update `public/index.html` with active runs, recent runs, run detail, and raw debug tab regions using semantic landmarks and buttons.
+- [x] 3.2 Update `public/app.js` to fetch run APIs, render cards/details with `textContent`, copy session IDs, and stop deriving canonical state from timeline regex.
+- [x] 3.3 Update `public/styles.css` with status chips, dense master/detail layout, visible focus, responsive behavior, and reduced-motion-safe refreshes.
+- [x] 3.4 Update `README.md` to document `subagent-runs.ndjson`, endpoints, optional metadata, and raw log fallback.
 
 ## Phase 4: Verification
 
-- [ ] 4.1 Create temporary fixture logs and verify active/recent/detail API responses with `npm start` and `curl`.
-- [ ] 4.2 Manually verify UI scenarios: active work, terminal run detail, missing model/usage labels, copy links, and raw debug tabs.
-- [ ] 4.3 Restart OpenCode and confirm the global plugin writes structured records without breaking existing timeline/events logs.
+- [x] 4.1 Create temporary fixture logs and verify active/recent/detail API responses with `npm start` and `curl`.
+- [x] 4.2 Manually verify UI scenarios: active work, terminal run detail, missing model/usage labels, copy links, and raw debug tabs.
+- [x] 4.3 Runtime confirmation received after restarting OpenCode and running a native task subagent; fixed follow-up model/debug display bugs and reinstalled the global plugin source.

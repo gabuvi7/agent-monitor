@@ -136,6 +136,10 @@ function displayLabel(value, fallback = "Unknown") {
   return knownString(value) ?? fallback
 }
 
+function modelLabel(value) {
+  return knownString(value) ?? "Unavailable from hook payload"
+}
+
 function timestampMs(value) {
   const ms = Date.parse(value ?? "")
   return Number.isFinite(ms) ? ms : null
@@ -236,7 +240,9 @@ function normalizeRun(key, record, nowMs = Date.now()) {
     parentMessageId: knownString(record.parentMessageId),
     childSessionId: knownString(record.childSessionId),
     agent: displayLabel(record.agent),
-    model: displayLabel(record.model),
+    model: modelLabel(record.model),
+    modelAvailable: Boolean(knownString(record.model)),
+    modelUnavailableReason: knownString(record.model) ? null : "unavailable_from_hook_payload",
     startedAt: knownString(record.startedAt),
     updatedAt: knownString(record.updatedAt),
     completedAt: knownString(record.completedAt),
