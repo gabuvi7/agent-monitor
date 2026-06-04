@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subagent Lab | opencode</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">opencode</p>
+        <h1>Subagent Lab</h1>
+        <p class="subtitle">Vista centralizada de lo que hacen los subagentes mientras trabajan.</p>
+      </div>
+      <a class="docs-link" href="/README.md">README</a>
+    </header>
+
+    <main class="layout">
+      <aside class="panel projects-panel" aria-labelledby="projects-title">
+        <div class="panel-heading">
+          <h2 id="projects-title">Proyectos</h2>
+          <button id="refresh-projects" type="button">Actualizar</button>
+        </div>
+        <p class="hint">Se listan proyectos que ya tienen logs.</p>
+        <nav aria-label="Proyectos con logs">
+          <ul id="project-list" class="project-list"></ul>
+        </nav>
+      </aside>
+
+      <section class="panel logs-panel" aria-labelledby="logs-title">
+        <div class="panel-heading logs-heading">
+          <div>
+            <h2 id="logs-title">Timeline</h2>
+            <p id="selected-project" class="hint">Elegí un proyecto para empezar.</p>
+          </div>
+          <div class="actions">
+            <label class="toggle">
+              <input id="auto-refresh" type="checkbox" checked>
+              Auto-refresh
+            </label>
+            <button id="refresh-logs" type="button">Refrescar</button>
+          </div>
+        </div>
+
+        <search class="filters">
+          <label for="filter-input">Filtrar eventos</label>
+          <input id="filter-input" type="search" placeholder="task, tool, error, sdd..." autocomplete="off">
+        </search>
+
+        <section class="activity-summary" aria-labelledby="summary-title">
+          <h3 id="summary-title">Qué está haciendo</h3>
+          <dl class="summary-grid">
+            <div>
+              <dt>Modelo detectado</dt>
+              <dd id="summary-model">Sin datos todavía</dd>
+            </div>
+            <div>
+              <dt>Agente/subagente</dt>
+              <dd id="summary-agent">Sin datos todavía</dd>
+            </div>
+            <div class="summary-wide">
+              <dt>Última acción</dt>
+              <dd id="summary-action">Sin datos todavía</dd>
+            </div>
+          </dl>
+        </section>
+
+        <div class="tabs" aria-label="Tipo de log">
+          <button id="timeline-tab" type="button" aria-pressed="true" data-kind="timeline">Timeline</button>
+          <button id="events-tab" type="button" aria-pressed="false" data-kind="events">Eventos crudos</button>
+        </div>
+
+        <output id="status" class="status" aria-live="polite"></output>
+        <pre id="log-output" class="log-output" tabindex="0"><code>No hay proyecto seleccionado.</code></pre>
+      </section>
+    </main>
+  </body>
+</html>
