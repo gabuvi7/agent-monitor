@@ -1,8 +1,13 @@
+const REFRESH_INTERVAL_MS = 2_500
+
 const state = {
   project: null,
   kind: "timeline",
   content: "",
   projects: [],
+  activeRuns: [],
+  recentRuns: [],
+  selectedRunKey: null,
 }
 
 const els = {
@@ -14,9 +19,15 @@ const els = {
   filterInput: document.querySelector("#filter-input"),
   logOutput: document.querySelector("#log-output code"),
   status: document.querySelector("#status"),
-  summaryModel: document.querySelector("#summary-model"),
-  summaryAgent: document.querySelector("#summary-agent"),
-  summaryAction: document.querySelector("#summary-action"),
+  summaryActive: document.querySelector("#summary-active"),
+  summaryRecent: document.querySelector("#summary-recent"),
+  summaryUpdated: document.querySelector("#summary-updated"),
+  activeRuns: document.querySelector("#active-runs"),
+  recentRuns: document.querySelector("#recent-runs"),
+  activeCount: document.querySelector("#active-count"),
+  recentCount: document.querySelector("#recent-count"),
+  runDetail: document.querySelector("#run-detail"),
+  clearDetail: document.querySelector("#clear-detail"),
   tabs: [...document.querySelectorAll("[data-kind]")],
 }
 
@@ -24,12 +35,46 @@ function setStatus(message) {
   els.status.textContent = message
 }
 
+function valueOrUnavailable(value) {
+  return value === null || value === undefined || value === "" ? "No disponible" : String(value)
+}
+
+function modelLabel(run) {
+  if (run?.modelAvailable === false || run?.modelUnavailableReason === "unavailable_from_hook_payload") {
+    return "No disponible en payload del hook"
+  }
+  return valueOrUnavailable(run?.model)
+}
+
+function truncateText(value, max = 1_200) {
+  const text = String(value ?? "")
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}\n… truncado ${text.length - max} caracteres`
+}
+
 function formatDate(value) {
   if (!value) return "sin fecha"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "fecha inválida"
+
   return new Intl.DateTimeFormat("es-AR", {
     dateStyle: "short",
     timeStyle: "medium",
-  }).format(new Date(value))
+  }).format(date)
+}
+
+function formatDuration(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "duración desconocida"
+  if (ms < 1_000) return `${Math.round(ms)} ms`
+
+  const totalSeconds = Math.round(ms / 1_000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes === 0) return `${seconds} s`
+
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return hours === 0 ? `${minutes} min ${seconds} s` : `${hours} h ${remainingMinutes} min`
 }
 
 async function fetchJson(url) {
@@ -38,31 +83,50 @@ async function fetchJson(url) {
   return response.json()
 }
 
+function appendText(parent, tagName, text, className) {
+  const element = document.createElement(tagName)
+  if (className) element.className = className
+  element.textContent = text
+  parent.append(element)
+  return element
+}
+
+function createStatusChip(run) {
+  const chip = document.createElement("span")
+  chip.className = `status-chip status-${run.status}`
+  chip.textContent = statusLabel(run.status)
+  return chip
+}
+
+function statusLabel(status) {
+  return {
+    running: "En ejecución",
+    completed: "Completado",
+    failed: "Falló",
+    cancelled: "Cancelado",
+    timeout: "Timeout",
+    unknown: "Desconocido",
+  }[status] ?? "Desconocido"
+}
+
 function renderProjects() {
   els.projectList.replaceChildren()
 
   if (state.projects.length === 0) {
-    const item = document.createElement("li")
-    item.textContent = "Todavía no hay logs. Abrí opencode en algún proyecto y delegá una tarea."
-    item.className = "hint"
-    els.projectList.append(item)
+    appendText(els.projectList, "li", "Todavía no hay logs. Abrí opencode en algún proyecto y delegá una tarea.", "hint")
     return
   }
 
   for (const project of state.projects) {
     const item = document.createElement("li")
     const button = document.createElement("button")
-    const meta = document.createElement("span")
 
     button.type = "button"
     button.className = "project-button"
     button.dataset.project = project.name
     button.setAttribute("aria-current", project.name === state.project ? "page" : "false")
     button.textContent = project.name
-
-    meta.className = "project-meta"
-    meta.textContent = `Última actividad: ${formatDate(project.updatedAt)}`
-    button.append(meta)
+    appendText(button, "span", `Última actividad: ${formatDate(project.updatedAt)}`, "project-meta")
 
     button.addEventListener("click", () => selectProject(project.name))
     item.append(button)
@@ -72,46 +136,211 @@ function renderProjects() {
 
 function renderLog() {
   const query = els.filterInput.value.trim().toLowerCase()
-  const lines = state.content.split("\n")
+  const lines = formatDebugContent(state.kind, state.content).split("\n")
   const filtered = query ? lines.filter((line) => line.toLowerCase().includes(query)) : lines
 
   els.logOutput.textContent = filtered.join("\n") || "No hay contenido para mostrar."
-  renderSummary(lines)
 }
 
-function lastMatch(lines, pattern) {
-  for (const line of [...lines].reverse()) {
-    const match = line.match(pattern)
-    if (match?.[1]) return match[1].trim()
+function formatModelValue(model) {
+  if (!model || typeof model !== "object") return null
+  return model.providerID && (model.modelID || model.id)
+    ? `${model.providerID}/${model.modelID ?? model.id}`
+    : model.modelID ?? model.id ?? null
+}
+
+function summarizeEventEntry(entry, index) {
+  const event = entry?.payload?.raw?.event ?? entry?.event ?? entry
+  const props = event?.properties ?? {}
+  const part = props.part ?? {}
+  const state = part.state ?? {}
+  const metadata = state.metadata ?? entry?.payload?.output?.metadata ?? {}
+  const fields = [
+    `#${index + 1}`,
+    entry?.ts,
+    entry?.kind,
+    event?.type,
+    event?.id,
+    part.tool ? `tool=${part.tool}` : null,
+    part.callID ? `call=${part.callID}` : null,
+    state.status ? `status=${state.status}` : null,
+    props.sessionID ? `session=${props.sessionID}` : null,
+    metadata.sessionId ? `child=${metadata.sessionId}` : null,
+    metadata.parentSessionId ? `parent=${metadata.parentSessionId}` : null,
+    formatModelValue(metadata.model) ? `model=${formatModelValue(metadata.model)}` : null,
+    state.title ? `title=${state.title}` : null,
+  ].filter(Boolean)
+
+  return `${fields.join(" | ")}\n${truncateText(JSON.stringify(entry, null, 2), 1_600)}`
+}
+
+function formatDebugContent(kind, content) {
+  if (kind !== "events") return content
+  const blocks = content
+    .split(/\n(?=\{)/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line, index) => {
+      try {
+        return [summarizeEventEntry(JSON.parse(line), index)]
+      } catch {
+        return [`#${index + 1} | NDJSON inválido\n${truncateText(line, 1_600)}`]
+      }
+    })
+  return blocks.join("\n\n---\n\n")
+}
+
+function runTitle(run) {
+  const agent = valueOrUnavailable(run.agent)
+  const action = run.action && run.action !== "Unavailable" ? run.action : "sin acción registrada"
+  return `${agent} · ${action}`
+}
+
+function createRunCard(run) {
+  const item = document.createElement("li")
+  const button = document.createElement("button")
+  const header = document.createElement("span")
+  const meta = document.createElement("span")
+  const session = run.childSessionId ?? run.parentSessionId ?? run.delegationId
+
+  button.type = "button"
+  button.className = "run-card"
+  button.dataset.key = run.key
+  button.setAttribute("aria-current", run.key === state.selectedRunKey ? "true" : "false")
+
+  header.className = "run-card-header"
+  header.append(createStatusChip(run))
+  appendText(header, "strong", runTitle(run), "run-title")
+
+  meta.className = "run-card-meta"
+  appendText(meta, "span", `Modelo: ${modelLabel(run)}`)
+  appendText(meta, "span", `Duración: ${formatDuration(run.durationMs)}`)
+  appendText(meta, "span", `Sesión: ${valueOrUnavailable(session)}`)
+  appendText(meta, "span", `Actualizado: ${formatDate(run.updatedAt)}`)
+
+  button.append(header, meta)
+  button.addEventListener("click", () => selectRun(run.key))
+  item.append(button)
+  return item
+}
+
+function renderRunList(listElement, runs, emptyMessage) {
+  listElement.replaceChildren()
+  if (runs.length === 0) {
+    appendText(listElement, "li", emptyMessage, "empty-state")
+    return
   }
-  return null
+
+  for (const run of runs) {
+    listElement.append(createRunCard(run))
+  }
 }
 
-function cleanValue(value) {
-  return value?.replace(/\s*\|\s*$/, "").trim() || null
+function renderRuns() {
+  renderRunList(els.activeRuns, state.activeRuns, "No hay subagentes activos ahora.")
+  renderRunList(els.recentRuns, state.recentRuns, "No hay ejecuciones recientes para mostrar.")
+
+  els.activeCount.textContent = String(state.activeRuns.length)
+  els.recentCount.textContent = String(state.recentRuns.length)
+  els.summaryActive.textContent = String(state.activeRuns.length)
+  els.summaryRecent.textContent = String(state.recentRuns.length)
+  els.summaryUpdated.textContent = new Date().toLocaleTimeString("es-AR")
 }
 
-function renderSummary(lines) {
-  const model = cleanValue(lastMatch(lines, /model:\s*([^|]+)/i))
-  const agent = cleanValue(lastMatch(lines, /agent:\s*([^|]+)/i))
-  const action = cleanValue(lastMatch(lines, /does:\s*(.+)$/i))
-    ?? cleanValue(lastMatch(lines, /(?:before|after [a-z]+) \|\s*(.+)$/i))
-
-  els.summaryModel.textContent = model ?? "Sin datos todavía"
-  els.summaryAgent.textContent = agent ?? "Sin datos todavía"
-  els.summaryAction.textContent = action ?? "Sin datos todavía"
+function createDetailRow(term, value) {
+  const wrapper = document.createElement("div")
+  appendText(wrapper, "dt", term)
+  appendText(wrapper, "dd", valueOrUnavailable(value))
+  return wrapper
 }
 
-async function loadProjects() {
+function createCopyButton(label, value) {
+  const button = document.createElement("button")
+  button.type = "button"
+  button.className = "copy-button"
+  button.textContent = label
+  button.disabled = !value
+  button.addEventListener("click", async () => {
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      setStatus(`${label} copiado`)
+    } catch {
+      setStatus("No pude copiar al portapapeles")
+    }
+  })
+  return button
+}
+
+function formatUsage(usage) {
+  if (!usage || typeof usage !== "object") return "No disponible"
+  const parts = []
+  if (usage.inputTokens !== undefined) parts.push(`input: ${usage.inputTokens}`)
+  if (usage.outputTokens !== undefined) parts.push(`output: ${usage.outputTokens}`)
+  if (usage.contextPercent !== undefined) parts.push(`contexto: ${usage.contextPercent}%`)
+  return parts.length ? parts.join(" · ") : "No disponible"
+}
+
+function renderDetail(run) {
+  els.runDetail.replaceChildren()
+  els.runDetail.className = "detail-card"
+
+  const heading = document.createElement("div")
+  heading.className = "detail-heading"
+  heading.append(createStatusChip(run))
+  appendText(heading, "strong", runTitle(run), "detail-title")
+
+  const definitionList = document.createElement("dl")
+  definitionList.className = "detail-grid"
+  definitionList.append(
+    createDetailRow("Fuente", run.source),
+    createDetailRow("Modelo", modelLabel(run)),
+    createDetailRow("Duración", formatDuration(run.durationMs)),
+    createDetailRow("Inicio", formatDate(run.startedAt)),
+    createDetailRow("Última actualización", formatDate(run.updatedAt)),
+    createDetailRow("Fin", run.completedAt ? formatDate(run.completedAt) : null),
+    createDetailRow("Delegación", run.delegationId),
+    createDetailRow("Sesión padre", run.parentSessionId),
+    createDetailRow("Sesión hija", run.childSessionId),
+    createDetailRow("Uso", formatUsage(run.usage)),
+    createDetailRow("Resultado", run.outcome),
+    createDetailRow("Error", run.error),
+  )
+
+  const actions = document.createElement("div")
+  actions.className = "detail-actions"
+  actions.append(
+    createCopyButton("Copiar delegación", run.delegationId),
+    createCopyButton("Copiar sesión padre", run.parentSessionId),
+    createCopyButton("Copiar sesión hija", run.childSessionId),
+  )
+
+  const debugHint = document.createElement("p")
+  debugHint.className = "hint"
+  debugHint.textContent = "Usá el panel de debug crudo para revisar timeline o eventos relacionados."
+
+  els.runDetail.append(heading, definitionList, actions, debugHint)
+}
+
+function clearDetail() {
+  state.selectedRunKey = null
+  els.runDetail.className = "detail-card empty-state"
+  els.runDetail.textContent = "Seleccioná una ejecución para ver el detalle."
+  renderRuns()
+}
+
+async function loadProjects({ announce = true } = {}) {
   try {
     const data = await fetchJson("/api/projects")
     state.projects = data.projects
     renderProjects()
-    setStatus(`Proyectos actualizados: ${state.projects.length}`)
 
     if (!state.project && state.projects[0]) {
       await selectProject(state.projects[0].name)
+      return
     }
+
+    if (announce) setStatus(`Proyectos actualizados: ${state.projects.length}`)
   } catch (error) {
     setStatus(`No pude cargar proyectos: ${error.message}`)
   }
@@ -119,21 +348,53 @@ async function loadProjects() {
 
 async function selectProject(project) {
   state.project = project
+  state.selectedRunKey = null
   els.selectedProject.textContent = `Proyecto seleccionado: ${project}`
+  clearDetail()
   renderProjects()
-  await loadLog()
+  await loadMonitor()
 }
 
-async function loadLog() {
+async function loadMonitor({ announce = true } = {}) {
   if (!state.project) return
 
   try {
-    const data = await fetchJson(`/api/projects/${encodeURIComponent(state.project)}/${state.kind}`)
-    state.content = data.content
+    const encodedProject = encodeURIComponent(state.project)
+    const [active, recent, debug] = await Promise.all([
+      fetchJson(`/api/projects/${encodedProject}/runs?status=active&limit=50`),
+      fetchJson(`/api/projects/${encodedProject}/runs?status=recent&limit=50`),
+      fetchJson(`/api/projects/${encodedProject}/${state.kind}`),
+    ])
+
+    state.activeRuns = active.runs
+    state.recentRuns = recent.runs
+    state.content = debug.content
+    renderRuns()
     renderLog()
-    setStatus(`Actualizado: ${new Date().toLocaleTimeString("es-AR")}`)
+
+    if (state.selectedRunKey) await loadRunDetail(state.selectedRunKey, { announce: false })
+    if (announce) setStatus(`Actualizado: ${new Date().toLocaleTimeString("es-AR")}`)
   } catch (error) {
-    setStatus(`No pude cargar logs: ${error.message}`)
+    setStatus(`No pude cargar el monitor: ${error.message}`)
+  }
+}
+
+async function selectRun(key) {
+  state.selectedRunKey = key
+  renderRuns()
+  await loadRunDetail(key, { announce: true })
+}
+
+async function loadRunDetail(key, { announce }) {
+  if (!state.project) return
+
+  try {
+    const data = await fetchJson(`/api/projects/${encodeURIComponent(state.project)}/runs/${encodeURIComponent(key)}`)
+    renderDetail(data.run)
+    if (announce) setStatus("Detalle actualizado")
+  } catch (error) {
+    els.runDetail.className = "detail-card empty-state"
+    els.runDetail.textContent = `No pude cargar el detalle: ${error.message}`
   }
 }
 
@@ -142,12 +403,13 @@ function selectTab(kind) {
   for (const tab of els.tabs) {
     tab.setAttribute("aria-pressed", String(tab.dataset.kind === kind))
   }
-  loadLog()
+  loadMonitor()
 }
 
-els.refreshProjects.addEventListener("click", loadProjects)
-els.refreshLogs.addEventListener("click", loadLog)
+els.refreshProjects.addEventListener("click", () => loadProjects())
+els.refreshLogs.addEventListener("click", () => loadMonitor())
 els.filterInput.addEventListener("input", renderLog)
+els.clearDetail.addEventListener("click", clearDetail)
 
 for (const tab of els.tabs) {
   tab.addEventListener("click", () => selectTab(tab.dataset.kind))
@@ -155,9 +417,9 @@ for (const tab of els.tabs) {
 
 setInterval(() => {
   if (els.autoRefresh.checked) {
-    loadProjects()
-    loadLog()
+    loadProjects({ announce: false })
+    loadMonitor({ announce: false })
   }
-}, 2_500)
+}, REFRESH_INTERVAL_MS)
 
 loadProjects()
