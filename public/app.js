@@ -39,11 +39,40 @@ function valueOrUnavailable(value) {
   return value === null || value === undefined || value === "" ? "No disponible" : String(value)
 }
 
+function compactText(value, max = 96) {
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!text) return "Sin acción registrada"
+  if (text.length <= max) return text
+  return `${text.slice(0, max - 1).trimEnd()}…`
+}
+
 function modelLabel(run) {
   if (run?.modelAvailable === false || run?.modelUnavailableReason === "unavailable_from_hook_payload") {
     return "No disponible en payload del hook"
   }
   return valueOrUnavailable(run?.model)
+}
+
+function provenanceLabel(run) {
+  return {
+    direct: "Directo",
+    inferred: "Inferido",
+    unavailable: "No disponible",
+  }[run?.modelProvenance] ?? "No disponible"
+}
+
+function modelReasonLabel(run) {
+  if (run?.modelInferenceReason) return run.modelInferenceReason
+  if (run?.modelUnavailableReason) return run.modelUnavailableReason
+  return null
+}
+
+function confidenceLabel(value) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${Math.round(value * 100)}%`
+    : null
 }
 
 function truncateText(value, max = 1_200) {
@@ -191,17 +220,27 @@ function formatDebugContent(kind, content) {
 }
 
 function runTitle(run) {
-  const agent = valueOrUnavailable(run.agent)
-  const action = run.action && run.action !== "Unavailable" ? run.action : "sin acción registrada"
-  return `${agent} · ${action}`
+  return valueOrUnavailable(run.agent)
+}
+
+function runSummary(run) {
+  const summary = run.actionSummary && run.actionSummary !== "Unavailable" ? run.actionSummary : run.action
+  return compactText(summary)
+}
+
+function sessionLabel(run) {
+  if (run.childSessionId) return `Hija: ${run.childSessionId}`
+  if (run.parentSessionId) return `Padre: ${run.parentSessionId}`
+  if (run.delegationId) return `Delegación: ${run.delegationId}`
+  return "Sesión: No disponible"
 }
 
 function createRunCard(run) {
   const item = document.createElement("li")
   const button = document.createElement("button")
   const header = document.createElement("span")
+  const summary = document.createElement("span")
   const meta = document.createElement("span")
-  const session = run.childSessionId ?? run.parentSessionId ?? run.delegationId
 
   button.type = "button"
   button.className = "run-card"
@@ -212,13 +251,17 @@ function createRunCard(run) {
   header.append(createStatusChip(run))
   appendText(header, "strong", runTitle(run), "run-title")
 
+  summary.className = "run-summary"
+  summary.textContent = runSummary(run)
+
   meta.className = "run-card-meta"
   appendText(meta, "span", `Modelo: ${modelLabel(run)}`)
+  appendText(meta, "span", `Origen del modelo: ${provenanceLabel(run)}`)
   appendText(meta, "span", `Duración: ${formatDuration(run.durationMs)}`)
-  appendText(meta, "span", `Sesión: ${valueOrUnavailable(session)}`)
+  appendText(meta, "span", sessionLabel(run))
   appendText(meta, "span", `Actualizado: ${formatDate(run.updatedAt)}`)
 
-  button.append(header, meta)
+  button.append(header, summary, meta)
   button.addEventListener("click", () => selectRun(run.key))
   item.append(button)
   return item
@@ -272,6 +315,24 @@ function createCopyButton(label, value) {
   return button
 }
 
+function createFullTextSection(title, value, copyLabel) {
+  const section = document.createElement("section")
+  const header = document.createElement("div")
+  const text = value && value !== "Unavailable" ? String(value) : "No disponible"
+
+  section.className = "detail-text-section"
+  header.className = "detail-subheading"
+  appendText(header, "h4", title)
+  header.append(createCopyButton(copyLabel, text === "No disponible" ? null : text))
+
+  const content = document.createElement("pre")
+  content.className = "detail-full-text"
+  content.textContent = text
+
+  section.append(header, content)
+  return section
+}
+
 function formatUsage(usage) {
   if (!usage || typeof usage !== "object") return "No disponible"
   const parts = []
@@ -295,6 +356,9 @@ function renderDetail(run) {
   definitionList.append(
     createDetailRow("Fuente", run.source),
     createDetailRow("Modelo", modelLabel(run)),
+    createDetailRow("Origen del modelo", provenanceLabel(run)),
+    createDetailRow("Motivo del modelo", modelReasonLabel(run)),
+    createDetailRow("Confianza", confidenceLabel(run.modelConfidence)),
     createDetailRow("Duración", formatDuration(run.durationMs)),
     createDetailRow("Inicio", formatDate(run.startedAt)),
     createDetailRow("Última actualización", formatDate(run.updatedAt)),
@@ -313,13 +377,16 @@ function renderDetail(run) {
     createCopyButton("Copiar delegación", run.delegationId),
     createCopyButton("Copiar sesión padre", run.parentSessionId),
     createCopyButton("Copiar sesión hija", run.childSessionId),
+    createCopyButton("Copiar acción", run.action && run.action !== "Unavailable" ? run.action : null),
   )
+
+  const fullAction = createFullTextSection("Acción / prompt completo", run.action, "Copiar texto")
 
   const debugHint = document.createElement("p")
   debugHint.className = "hint"
-  debugHint.textContent = "Usá el panel de debug crudo para revisar timeline o eventos relacionados."
+  debugHint.textContent = "Usá el panel de debug crudo para revisar timeline o eventos relacionados; filtrá por sesión o delegación."
 
-  els.runDetail.append(heading, definitionList, actions, debugHint)
+  els.runDetail.append(heading, definitionList, actions, fullAction, debugHint)
 }
 
 function clearDetail() {

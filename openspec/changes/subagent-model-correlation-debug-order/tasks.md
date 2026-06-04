@@ -37,14 +37,14 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Presentation
 
-- [ ] 3.1 Update `public/app.js` cards to use compact summaries, provenance labels, durations, agent, model, and session linkage without long prompt titles.
-- [ ] 3.2 Update `public/app.js` selected-detail rendering to show full action/prompt, outcome/failure, reasons/confidence, and existing copy affordances.
+- [x] 3.1 Update `public/app.js` cards to use compact summaries, provenance labels, durations, agent, model, and session linkage without long prompt titles.
+- [x] 3.2 Update `public/app.js` selected-detail rendering to show full action/prompt, outcome/failure, reasons/confidence, and existing copy affordances.
 - [ ] 3.3 Refactor `public/app.js` debug/timeline formatting to parse entry blocks, reverse blocks, then apply filters.
-- [ ] 3.4 Add `public/styles.css` clamping/detail styles with accessible buttons, focus-visible support, and usable stacked layout defaults.
+- [x] 3.4 Add `public/styles.css` clamping/detail styles with accessible buttons, focus-visible support, and usable stacked layout defaults.
 
 ## Phase 4: Verification
 
 - [x] 4.1 Start `node server.js`; inspect `/api/projects/:project/runs` for direct, inferred, and unavailable model provenance.
-- [ ] 4.2 Browser-smoke active/recent cards with huge action text; verify full text is available through detail/copy.
+- [x] 4.2 Browser-smoke active/recent cards with huge action text; verify full text is available through detail/copy.
 - [ ] 4.3 Browser-smoke multiline debug/timeline entries; verify newest-first order preserves each entry as one block.
 - [x] 4.4 Record manual verification notes in the apply/verify output because no automated runner exists.
