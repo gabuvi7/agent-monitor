@@ -52,6 +52,6 @@ Chain strategy: stacked-to-main
 
 ## Phase 4: Verification
 
-- [ ] 4.1 Create temporary fixture logs and verify active/recent/detail API responses with `npm start` and `curl`.
-- [ ] 4.2 Manually verify UI scenarios: active work, terminal run detail, missing model/usage labels, copy links, and raw debug tabs.
-- [ ] 4.3 Restart OpenCode and confirm the global plugin writes structured records without breaking existing timeline/events logs.
+- [x] 4.1 Create temporary fixture logs and verify active/recent/detail API responses with `npm start` and `curl`.
+- [x] 4.2 Manually verify UI scenarios: active work, terminal run detail, missing model/usage labels, copy links, and raw debug tabs.
+- [x] 4.3 Runtime confirmation received after restarting OpenCode and running a native task subagent; fixed follow-up model/debug display bugs and reinstalled the global plugin source.

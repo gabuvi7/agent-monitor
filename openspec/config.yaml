@@ -37,7 +37,7 @@ testing:
 persistence: hybrid
 workflow:
   execution_mode: interactive
-  chained_pr_strategy: auto-forecast
+  chained_pr_strategy: ask-always
   review_budget_lines: 800
 
 context: |

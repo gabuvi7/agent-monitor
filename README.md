@@ -103,7 +103,7 @@ El timeline intenta registrar líneas más explicativas, por ejemplo:
 before | delegation/tool: task | agent: sdd-verify-smart-profiles | model: openai/gpt-5.5 | does: Verify implementation against specs
 ```
 
-Si opencode no expone modelo, uso de tokens o contexto para una ejecución, el registro sigue siendo válido y la UI muestra `No disponible` en vez de inventar datos.
+El modelo de tareas nativas puede llegar en `metadata.model` del resultado/hook de herramienta; el plugin lo normaliza como `provider/model` cuando está disponible. Si opencode no expone modelo, uso de tokens o contexto para una ejecución, el registro sigue siendo válido y la UI muestra `No disponible en payload del hook` o `No disponible` en vez de inventar datos.
 
 ## APIs locales
 
@@ -129,7 +129,7 @@ Los campos como `model`, `usage.inputTokens`, `usage.outputTokens` y `usage.cont
 
 ### Fallback crudo
 
-Si todavía no existe `subagent-runs.ndjson` para un proyecto, las APIs de runs devuelven listas vacías. En ese caso, el panel de debug crudo sigue permitiendo inspeccionar `subagent-timeline.md` y `opencode-events.ndjson` manualmente.
+Si todavía no existe `subagent-runs.ndjson` para un proyecto, las APIs de runs devuelven listas vacías. En ese caso, el panel de debug crudo sigue permitiendo inspeccionar `subagent-timeline.md` y `opencode-events.ndjson` manualmente. La vista de eventos resume cada línea NDJSON con tipo, herramienta, sesión, estado, título y modelo cuando existen, y deja el JSON recortado debajo para inspección puntual.
 
 ## Archivos principales
 

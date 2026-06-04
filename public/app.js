@@ -39,6 +39,19 @@ function valueOrUnavailable(value) {
   return value === null || value === undefined || value === "" ? "No disponible" : String(value)
 }
 
+function modelLabel(run) {
+  if (run?.modelAvailable === false || run?.modelUnavailableReason === "unavailable_from_hook_payload") {
+    return "No disponible en payload del hook"
+  }
+  return valueOrUnavailable(run?.model)
+}
+
+function truncateText(value, max = 1_200) {
+  const text = String(value ?? "")
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}\n… truncado ${text.length - max} caracteres`
+}
+
 function formatDate(value) {
   if (!value) return "sin fecha"
   const date = new Date(value)
@@ -123,10 +136,58 @@ function renderProjects() {
 
 function renderLog() {
   const query = els.filterInput.value.trim().toLowerCase()
-  const lines = state.content.split("\n")
+  const lines = formatDebugContent(state.kind, state.content).split("\n")
   const filtered = query ? lines.filter((line) => line.toLowerCase().includes(query)) : lines
 
   els.logOutput.textContent = filtered.join("\n") || "No hay contenido para mostrar."
+}
+
+function formatModelValue(model) {
+  if (!model || typeof model !== "object") return null
+  return model.providerID && (model.modelID || model.id)
+    ? `${model.providerID}/${model.modelID ?? model.id}`
+    : model.modelID ?? model.id ?? null
+}
+
+function summarizeEventEntry(entry, index) {
+  const event = entry?.payload?.raw?.event ?? entry?.event ?? entry
+  const props = event?.properties ?? {}
+  const part = props.part ?? {}
+  const state = part.state ?? {}
+  const metadata = state.metadata ?? entry?.payload?.output?.metadata ?? {}
+  const fields = [
+    `#${index + 1}`,
+    entry?.ts,
+    entry?.kind,
+    event?.type,
+    event?.id,
+    part.tool ? `tool=${part.tool}` : null,
+    part.callID ? `call=${part.callID}` : null,
+    state.status ? `status=${state.status}` : null,
+    props.sessionID ? `session=${props.sessionID}` : null,
+    metadata.sessionId ? `child=${metadata.sessionId}` : null,
+    metadata.parentSessionId ? `parent=${metadata.parentSessionId}` : null,
+    formatModelValue(metadata.model) ? `model=${formatModelValue(metadata.model)}` : null,
+    state.title ? `title=${state.title}` : null,
+  ].filter(Boolean)
+
+  return `${fields.join(" | ")}\n${truncateText(JSON.stringify(entry, null, 2), 1_600)}`
+}
+
+function formatDebugContent(kind, content) {
+  if (kind !== "events") return content
+  const blocks = content
+    .split(/\n(?=\{)/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line, index) => {
+      try {
+        return [summarizeEventEntry(JSON.parse(line), index)]
+      } catch {
+        return [`#${index + 1} | NDJSON inválido\n${truncateText(line, 1_600)}`]
+      }
+    })
+  return blocks.join("\n\n---\n\n")
 }
 
 function runTitle(run) {
@@ -152,7 +213,7 @@ function createRunCard(run) {
   appendText(header, "strong", runTitle(run), "run-title")
 
   meta.className = "run-card-meta"
-  appendText(meta, "span", `Modelo: ${valueOrUnavailable(run.model)}`)
+  appendText(meta, "span", `Modelo: ${modelLabel(run)}`)
   appendText(meta, "span", `Duración: ${formatDuration(run.durationMs)}`)
   appendText(meta, "span", `Sesión: ${valueOrUnavailable(session)}`)
   appendText(meta, "span", `Actualizado: ${formatDate(run.updatedAt)}`)
@@ -233,7 +294,7 @@ function renderDetail(run) {
   definitionList.className = "detail-grid"
   definitionList.append(
     createDetailRow("Fuente", run.source),
-    createDetailRow("Modelo", run.model),
+    createDetailRow("Modelo", modelLabel(run)),
     createDetailRow("Duración", formatDuration(run.durationMs)),
     createDetailRow("Inicio", formatDate(run.startedAt)),
     createDetailRow("Última actualización", formatDate(run.updatedAt)),
