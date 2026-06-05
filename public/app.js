@@ -89,7 +89,14 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("es-AR", {
     dateStyle: "short",
     timeStyle: "medium",
+    hourCycle: "h23",
   }).format(date)
+}
+
+function formatDebugTimestamp(value) {
+  if (!value) return null
+  const formatted = formatDate(value)
+  return formatted === "fecha inválida" ? value : formatted
 }
 
 function formatDuration(ms) {
@@ -186,7 +193,7 @@ function summarizeEventEntry(entry, index) {
   const metadata = state.metadata ?? entry?.payload?.output?.metadata ?? {}
   const fields = [
     `#${index + 1}`,
-    entry?.ts,
+    formatDebugTimestamp(entry?.ts),
     entry?.kind,
     event?.type,
     event?.id,
@@ -203,6 +210,13 @@ function summarizeEventEntry(entry, index) {
   return `${fields.join(" | ")}\n${truncateText(JSON.stringify(entry, null, 2), 1_600)}`
 }
 
+function formatTimelineBlock(block) {
+  return block.replace(
+    /^(- )(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)(\b)/,
+    (_, prefix, timestamp, suffix) => `${prefix}${formatDebugTimestamp(timestamp)}${suffix}`,
+  )
+}
+
 function parseTimelineBlocks(content) {
   const blocks = []
   let current = []
@@ -216,7 +230,7 @@ function parseTimelineBlocks(content) {
   }
 
   if (current.length > 0) blocks.push(current.join("\n").trimEnd())
-  return blocks.filter((block) => block.trim())
+  return blocks.filter((block) => block.trim()).map(formatTimelineBlock)
 }
 
 function parseEventBlocks(content) {
