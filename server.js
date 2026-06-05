@@ -14,6 +14,7 @@ const HOST = "127.0.0.1"
 const ACTIVE_STATUSES = new Set(["running"])
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "timeout"])
 const KNOWN_STATUSES = new Set([...ACTIVE_STATUSES, ...TERMINAL_STATUSES, "unknown"])
+const MODEL_INFERENCE_WINDOW_MS = 5 * 60 * 1_000
 
 function readEnvFile(path) {
   try {
@@ -128,6 +129,25 @@ async function readProjectRuns(project) {
     })
 }
 
+async function readProjectEvents(project) {
+  const content = await readProjectLog(project, "opencode-events.ndjson")
+  if (content === null) return null
+  if (!content.trim()) return []
+
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        const record = JSON.parse(line)
+        return record && typeof record === "object" ? [record] : []
+      } catch {
+        return []
+      }
+    })
+}
+
 function knownString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
@@ -136,13 +156,305 @@ function displayLabel(value, fallback = "Unknown") {
   return knownString(value) ?? fallback
 }
 
-function modelLabel(value) {
-  return knownString(value) ?? "Unavailable from hook payload"
+function firstKnownString(...values) {
+  for (const value of values) {
+    const text = knownString(value)
+    if (text) return text
+  }
+  return null
+}
+
+function modelName(...values) {
+  for (const value of values) {
+    const model = firstKnownString(
+      value?.providerID && value?.modelID ? `${value.providerID}/${value.modelID}` : null,
+      value?.providerID && value?.id ? `${value.providerID}/${value.id}` : null,
+      value?.model?.providerID && value?.model?.modelID ? `${value.model.providerID}/${value.model.modelID}` : null,
+      value?.model?.providerID && value?.model?.id ? `${value.model.providerID}/${value.model.id}` : null,
+      value?.metadata?.model?.providerID && value?.metadata?.model?.modelID ? `${value.metadata.model.providerID}/${value.metadata.model.modelID}` : null,
+      value?.metadata?.model?.providerID && value?.metadata?.model?.id ? `${value.metadata.model.providerID}/${value.metadata.model.id}` : null,
+      value?.state?.metadata?.model?.providerID && value?.state?.metadata?.model?.modelID ? `${value.state.metadata.model.providerID}/${value.state.metadata.model.modelID}` : null,
+      value?.state?.metadata?.model?.providerID && value?.state?.metadata?.model?.id ? `${value.state.metadata.model.providerID}/${value.state.metadata.model.id}` : null,
+      value?.providerID && value?.model ? `${value.providerID}/${value.model}` : null,
+      value?.providerID && value?.modelId ? `${value.providerID}/${value.modelId}` : null,
+      value?.providerID && value?.modelID ? `${value.providerID}/${value.modelID}` : null,
+      value?.providerID && value?.id ? `${value.providerID}/${value.id}` : null,
+      value?.providerID && value?.api?.id ? `${value.providerID}/${value.api.id}` : null,
+      value?.modelID,
+      value?.modelId,
+      value?.model,
+      value?.id,
+      value?.params?.model,
+    )
+    if (model && model !== "[object Object]") return model
+  }
+  return null
 }
 
 function timestampMs(value) {
   const ms = Date.parse(value ?? "")
   return Number.isFinite(ms) ? ms : null
+}
+
+function timeValueMs(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) return numeric
+    return timestampMs(value)
+  }
+  return null
+}
+
+function eventTimestampMs(event) {
+  return timestampMs(event?.ts)
+    ?? timeValueMs(event?.payload?.raw?.event?.properties?.time)
+    ?? timeValueMs(event?.payload?.raw?.event?.properties?.info?.time?.updated)
+    ?? timeValueMs(event?.payload?.raw?.event?.properties?.info?.time?.created)
+    ?? timeValueMs(event?.payload?.output?.message?.time?.created)
+    ?? timeValueMs(event?.payload?.input?.time?.created)
+}
+
+function eventSessionId(event) {
+  const payload = event?.payload
+  const rawEvent = payload?.raw?.event
+  return firstKnownString(
+    rawEvent?.properties?.part?.state?.metadata?.sessionId,
+    rawEvent?.properties?.part?.state?.metadata?.sessionID,
+    rawEvent?.properties?.part?.state?.metadata?.childSessionId,
+    rawEvent?.properties?.part?.state?.metadata?.childSessionID,
+    rawEvent?.properties?.sessionID,
+    rawEvent?.properties?.sessionId,
+    rawEvent?.properties?.info?.sessionID,
+    rawEvent?.properties?.info?.sessionId,
+    rawEvent?.properties?.info?.id,
+    rawEvent?.properties?.part?.sessionID,
+    rawEvent?.properties?.part?.sessionId,
+    payload?.input?.sessionID,
+    payload?.input?.sessionId,
+    payload?.output?.message?.sessionID,
+    payload?.output?.message?.sessionId,
+    payload?.output?.sessionID,
+    payload?.output?.sessionId,
+  )
+}
+
+function eventAgent(event) {
+  const payload = event?.payload
+  const rawEvent = payload?.raw?.event
+  return firstKnownString(
+    payload?.agent,
+    payload?.input?.agent,
+    payload?.output?.message?.agent,
+    rawEvent?.properties?.info?.agent,
+    rawEvent?.properties?.info?.mode,
+  )
+}
+
+function eventTitle(event) {
+  const payload = event?.payload
+  const rawEvent = payload?.raw?.event
+  return firstKnownString(
+    rawEvent?.properties?.part?.state?.title,
+    rawEvent?.properties?.part?.state?.input?.description,
+    rawEvent?.properties?.part?.state?.input?.prompt,
+    rawEvent?.properties?.part?.state?.input?.message,
+    rawEvent?.properties?.info?.title,
+    rawEvent?.properties?.part?.text,
+    payload?.output?.args?.description,
+    payload?.input?.args?.description,
+    payload?.input?.title,
+    payload?.input?.description,
+    payload?.input?.message,
+    payload?.output?.message?.title,
+    payload?.output?.message?.content,
+  )
+}
+
+function eventModel(event) {
+  const payload = event?.payload
+  const rawEvent = payload?.raw?.event
+  const info = rawEvent?.properties?.info
+  return modelName(
+    payload,
+    payload?.model,
+    payload?.input,
+    payload?.input?.model,
+    payload?.output,
+    payload?.output?.model,
+    payload?.output?.message,
+    payload?.output?.message?.model,
+    rawEvent?.properties,
+    info,
+    info?.model,
+    rawEvent?.properties?.part,
+    rawEvent?.properties?.part?.state?.metadata,
+    rawEvent?.properties?.part?.state?.metadata?.model,
+    rawEvent?.properties?.part?.model,
+  )
+}
+
+function modelEventCandidates(events) {
+  return events
+    .map((event) => ({
+      sessionId: eventSessionId(event),
+      model: eventModel(event),
+      agent: eventAgent(event),
+      title: eventTitle(event),
+      timeMs: eventTimestampMs(event),
+      kind: knownString(event?.kind),
+      eventType: knownString(event?.payload?.raw?.event?.type ?? event?.payload?.summary?.type),
+    }))
+    .filter((candidate) => candidate.model)
+}
+
+function uniqueModels(candidates) {
+  return [...new Set(candidates.map((candidate) => candidate.model).filter(Boolean))]
+}
+
+function chooseModel(candidates, reason, confidence) {
+  if (candidates.length === 0) return null
+  const models = uniqueModels(candidates)
+  if (models.length !== 1) {
+    return {
+      model: null,
+      provenance: "unavailable",
+      unavailableReason: `ambiguous_${reason}`,
+      inferenceReason: null,
+      confidence: null,
+    }
+  }
+  return {
+    model: models[0],
+    provenance: "inferred",
+    unavailableReason: null,
+    inferenceReason: reason,
+    confidence,
+  }
+}
+
+function chooseBestScoredModel(scoredCandidates, reason, confidence) {
+  const eligible = scoredCandidates
+    .filter((candidate) => candidate.score >= 0.35)
+    .sort((a, b) => b.score - a.score)
+  if (eligible.length === 0) return null
+
+  const topScore = eligible[0].score
+  const topModels = uniqueModels(eligible.filter((candidate) => topScore - candidate.score <= 0.05))
+  if (topModels.length !== 1) {
+    return {
+      model: null,
+      provenance: "unavailable",
+      unavailableReason: `ambiguous_${reason}`,
+      inferenceReason: null,
+      confidence: null,
+    }
+  }
+
+  return {
+    model: topModels[0],
+    provenance: "inferred",
+    unavailableReason: null,
+    inferenceReason: reason,
+    confidence,
+  }
+}
+
+function normalizedWords(value) {
+  return new Set(
+    String(value ?? "")
+      .toLowerCase()
+      .split(/[^a-z0-9._-]+/)
+      .filter((word) => word.length >= 4),
+  )
+}
+
+function textSimilarity(a, b) {
+  const left = normalizedWords(a)
+  const right = normalizedWords(b)
+  if (left.size === 0 || right.size === 0) return 0
+  let shared = 0
+  for (const word of left) {
+    if (right.has(word)) shared += 1
+  }
+  return shared / Math.max(left.size, right.size)
+}
+
+function actionSummary(value) {
+  const text = displayLabel(value, "Unavailable").replace(/\s+/g, " ").trim()
+  return text.length <= 160 ? text : `${text.slice(0, 157)}…`
+}
+
+function directModelMetadata(record) {
+  const model = knownString(record.model)
+  if (!model) return null
+
+  return {
+    model,
+    provenance: knownString(record.modelProvenance) ?? "direct",
+    unavailableReason: null,
+    inferenceReason: knownString(record.modelInferenceReason),
+    confidence: typeof record.modelConfidence === "number" && Number.isFinite(record.modelConfidence)
+      ? record.modelConfidence
+      : 1,
+  }
+}
+
+function unavailableModelMetadata(reason = "unavailable_from_hook_payload") {
+  return {
+    model: null,
+    provenance: "unavailable",
+    unavailableReason: reason,
+    inferenceReason: null,
+    confidence: null,
+  }
+}
+
+function inferModelMetadata(record, candidates) {
+  const direct = directModelMetadata(record)
+  if (direct) return direct
+
+  const childSessionId = knownString(record.childSessionId)
+  const parentSessionId = knownString(record.parentSessionId)
+  const source = knownString(record.source)
+
+  if (childSessionId) {
+    const match = chooseModel(
+      candidates.filter((candidate) => candidate.sessionId === childSessionId),
+      "exact_child_session",
+      0.95,
+    )
+    if (match) return match
+  }
+
+  if (parentSessionId && source !== "background.delegate") {
+    const match = chooseModel(
+      candidates.filter((candidate) => candidate.sessionId === parentSessionId),
+      "exact_parent_session",
+      0.8,
+    )
+    if (match?.provenance === "inferred") return match
+  }
+
+  if (source === "background.delegate") return unavailableModelMetadata("background_delegate_without_explicit_session_linkage")
+
+  const started = timestampMs(record.startedAt)
+  const action = knownString(record.action)
+  const agent = knownString(record.agent)
+  if (started !== null && (action || agent)) {
+    const nearby = candidates.flatMap((candidate) => {
+      if (candidate.timeMs === null || Math.abs(candidate.timeMs - started) > MODEL_INFERENCE_WINDOW_MS) return []
+      const similarity = action ? textSimilarity(action, candidate.title) : 0
+      const agentBonus = agent && candidate.agent === agent ? 0.25 : 0
+      const proximityBonus = 0.1 * (1 - (Math.abs(candidate.timeMs - started) / MODEL_INFERENCE_WINDOW_MS))
+      const score = similarity + agentBonus + proximityBonus
+      return score >= 0.35 ? [{ ...candidate, score }] : []
+    })
+    const match = chooseBestScoredModel(nearby, "nearby_agent_or_action_match", 0.55)
+    if (match) return match
+  }
+
+  return unavailableModelMetadata()
 }
 
 function normalizeStatus(value) {
@@ -206,6 +518,10 @@ function mergeRunRecord(previous, next) {
     childSessionId: mergeValue(newer.childSessionId, older.childSessionId),
     agent: mergeValue(newer.agent, older.agent),
     model: mergeValue(newer.model, older.model),
+    modelProvenance: mergeValue(newer.modelProvenance, older.modelProvenance),
+    modelUnavailableReason: mergeValue(newer.modelUnavailableReason, older.modelUnavailableReason),
+    modelInferenceReason: mergeValue(newer.modelInferenceReason, older.modelInferenceReason),
+    modelConfidence: mergeValue(newer.modelConfidence, older.modelConfidence),
     action: mergeValue(newer.action, older.action),
     outcome: mergeValue(newer.outcome, older.outcome),
     error: mergeValue(newer.error, older.error),
@@ -223,9 +539,11 @@ function newestRecordPerRun(records) {
   return [...runs.entries()].map(([key, record]) => ({ key, record }))
 }
 
-function normalizeRun(key, record, nowMs = Date.now()) {
+function normalizeRun(key, record, modelCandidates = [], nowMs = Date.now()) {
   const status = normalizeStatus(record.status)
   const duration = durationMs({ ...record, status }, nowMs)
+  const modelMetadata = inferModelMetadata(record, modelCandidates)
+  const action = displayLabel(record.action, "Unavailable")
 
   return {
     key,
@@ -240,14 +558,18 @@ function normalizeRun(key, record, nowMs = Date.now()) {
     parentMessageId: knownString(record.parentMessageId),
     childSessionId: knownString(record.childSessionId),
     agent: displayLabel(record.agent),
-    model: modelLabel(record.model),
-    modelAvailable: Boolean(knownString(record.model)),
-    modelUnavailableReason: knownString(record.model) ? null : "unavailable_from_hook_payload",
+    model: modelMetadata.model,
+    modelAvailable: Boolean(modelMetadata.model),
+    modelProvenance: modelMetadata.provenance,
+    modelUnavailableReason: modelMetadata.unavailableReason,
+    modelInferenceReason: modelMetadata.inferenceReason,
+    modelConfidence: modelMetadata.confidence,
     startedAt: knownString(record.startedAt),
     updatedAt: knownString(record.updatedAt),
     completedAt: knownString(record.completedAt),
     durationMs: duration,
-    action: displayLabel(record.action, "Unavailable"),
+    action,
+    actionSummary: actionSummary(action),
     outcome: knownString(record.outcome),
     error: knownString(record.error),
     usage: record.usage && typeof record.usage === "object" ? record.usage : null,
@@ -255,10 +577,11 @@ function normalizeRun(key, record, nowMs = Date.now()) {
   }
 }
 
-function normalizeRuns(records) {
+function normalizeRuns(records, events = []) {
   const nowMs = Date.now()
+  const modelCandidates = modelEventCandidates(events)
   return newestRecordPerRun(records)
-    .map(({ key, record }) => normalizeRun(key, record, nowMs))
+    .map(({ key, record }) => normalizeRun(key, record, modelCandidates, nowMs))
     .sort((a, b) => timestampMs(b.updatedAt) - timestampMs(a.updatedAt))
 }
 
@@ -288,14 +611,17 @@ async function handleApi(req, res, url) {
   if (runsMatch) {
     const project = decodeURIComponent(runsMatch[1])
     const lookupKey = runsMatch[2] ? decodeURIComponent(runsMatch[2]) : null
-    const records = await readProjectRuns(project)
+    const [records, events] = await Promise.all([
+      readProjectRuns(project),
+      readProjectEvents(project),
+    ])
 
-    if (records === null) {
+    if (records === null || events === null) {
       sendJson(res, 400, { error: "Invalid project path" })
       return true
     }
 
-    const runs = normalizeRuns(records)
+    const runs = normalizeRuns(records, events)
     if (lookupKey) {
       const run = runs.find((candidate) => matchesRunKey(candidate, lookupKey))
       sendJson(res, run ? 200 : 404, run ? { project, run } : { project, error: "Run not found" })
