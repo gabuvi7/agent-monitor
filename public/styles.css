@@ -379,6 +379,7 @@ h3 {
 }
 
 .status-cancelled,
+.status-stale,
 .status-unknown {
   background: var(--warning-bg);
   color: var(--warning);

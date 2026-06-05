@@ -141,6 +141,7 @@ function statusLabel(status) {
     failed: "Falló",
     cancelled: "Cancelado",
     timeout: "Timeout",
+    stale: "Obsoleto",
     unknown: "Desconocido",
   }[status] ?? "Desconocido"
 }

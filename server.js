@@ -13,9 +13,11 @@ const PORT = Number(process.env.PORT ?? 4317)
 const HOST = "127.0.0.1"
 const ACTIVE_STATUSES = new Set(["running"])
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "timeout"])
-const KNOWN_STATUSES = new Set([...ACTIVE_STATUSES, ...TERMINAL_STATUSES, "unknown"])
+const STALE_STATUSES = new Set(["stale"])
+const KNOWN_STATUSES = new Set([...ACTIVE_STATUSES, ...TERMINAL_STATUSES, ...STALE_STATUSES, "unknown"])
 const MODEL_INFERENCE_WINDOW_MS = 5 * 60 * 1_000
 const RUN_RECONCILIATION_WINDOW_MS = 5_000
+const STALE_AMBIGUOUS_DELEGATE_MS = 30 * 60 * 1_000
 
 function readEnvFile(path) {
   try {
@@ -465,6 +467,24 @@ function normalizeStatus(value) {
   return "unknown"
 }
 
+function isAmbiguousBackgroundDelegate(record) {
+  return knownString(record.source) === "background.delegate"
+    && !knownString(record.delegationId)
+    && !knownString(record.childSessionId)
+}
+
+function staleAmbiguousDelegateReason(record, nowMs = Date.now()) {
+  if (normalizeStatus(record.status) !== "running") return null
+  if (!isAmbiguousBackgroundDelegate(record)) return null
+
+  const updated = timestampMs(record.updatedAt) ?? timestampMs(record.startedAt)
+  if (updated === null) return null
+
+  return nowMs - updated >= STALE_AMBIGUOUS_DELEGATE_MS
+    ? "stale_ambiguous_background_delegate_without_updates"
+    : null
+}
+
 function durationMs(record, nowMs = Date.now()) {
   if (typeof record.durationMs === "number" && Number.isFinite(record.durationMs)) {
     return Math.max(0, Math.round(record.durationMs))
@@ -593,7 +613,8 @@ function newestRecordPerRun(records) {
 }
 
 function normalizeRun(key, record, modelCandidates = [], nowMs = Date.now()) {
-  const status = normalizeStatus(record.status)
+  const staleReason = staleAmbiguousDelegateReason(record, nowMs)
+  const status = staleReason ? "stale" : normalizeStatus(record.status)
   const duration = durationMs({ ...record, status }, nowMs)
   const modelMetadata = inferModelMetadata(record, modelCandidates)
   const action = displayLabel(record.action, "Unavailable")
@@ -604,6 +625,8 @@ function normalizeRun(key, record, modelCandidates = [], nowMs = Date.now()) {
     status,
     isActive: ACTIVE_STATUSES.has(status),
     isTerminal: TERMINAL_STATUSES.has(status),
+    isStale: STALE_STATUSES.has(status),
+    staleReason,
     projectName: displayLabel(record.projectName),
     projectRoot: knownString(record.projectRoot),
     delegationId: knownString(record.delegationId),
@@ -647,7 +670,7 @@ function limitValue(value) {
 function filterRuns(runs, status) {
   if (status === "active") return runs.filter((run) => run.isActive)
   if (status === "all") return runs
-  return runs.filter((run) => run.isTerminal || run.status === "unknown")
+  return runs.filter((run) => run.isTerminal || run.isStale || run.status === "unknown")
 }
 
 function matchesRunKey(run, key) {
