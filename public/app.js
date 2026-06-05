@@ -89,7 +89,14 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("es-AR", {
     dateStyle: "short",
     timeStyle: "medium",
+    hourCycle: "h23",
   }).format(date)
+}
+
+function formatDebugTimestamp(value) {
+  if (!value) return null
+  const formatted = formatDate(value)
+  return formatted === "fecha inválida" ? value : formatted
 }
 
 function formatDuration(ms) {
@@ -134,6 +141,7 @@ function statusLabel(status) {
     failed: "Falló",
     cancelled: "Cancelado",
     timeout: "Timeout",
+    stale: "Obsoleto",
     unknown: "Desconocido",
   }[status] ?? "Desconocido"
 }
@@ -165,10 +173,10 @@ function renderProjects() {
 
 function renderLog() {
   const query = els.filterInput.value.trim().toLowerCase()
-  const lines = formatDebugContent(state.kind, state.content).split("\n")
-  const filtered = query ? lines.filter((line) => line.toLowerCase().includes(query)) : lines
+  const blocks = formatDebugBlocks(state.kind, state.content)
+  const filtered = query ? blocks.filter((block) => block.toLowerCase().includes(query)) : blocks
 
-  els.logOutput.textContent = filtered.join("\n") || "No hay contenido para mostrar."
+  els.logOutput.textContent = filtered.join("\n\n---\n\n") || "No hay contenido para mostrar."
 }
 
 function formatModelValue(model) {
@@ -186,7 +194,7 @@ function summarizeEventEntry(entry, index) {
   const metadata = state.metadata ?? entry?.payload?.output?.metadata ?? {}
   const fields = [
     `#${index + 1}`,
-    entry?.ts,
+    formatDebugTimestamp(entry?.ts),
     entry?.kind,
     event?.type,
     event?.id,
@@ -203,9 +211,31 @@ function summarizeEventEntry(entry, index) {
   return `${fields.join(" | ")}\n${truncateText(JSON.stringify(entry, null, 2), 1_600)}`
 }
 
-function formatDebugContent(kind, content) {
-  if (kind !== "events") return content
-  const blocks = content
+function formatTimelineBlock(block) {
+  return block.replace(
+    /^(- )(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)(\b)/,
+    (_, prefix, timestamp, suffix) => `${prefix}${formatDebugTimestamp(timestamp)}${suffix}`,
+  )
+}
+
+function parseTimelineBlocks(content) {
+  const blocks = []
+  let current = []
+
+  for (const line of String(content ?? "").split(/\r?\n/)) {
+    if (/^- \d{4}-\d{2}-\d{2}T/.test(line) && current.length > 0) {
+      blocks.push(current.join("\n").trimEnd())
+      current = []
+    }
+    if (line || current.length > 0) current.push(line)
+  }
+
+  if (current.length > 0) blocks.push(current.join("\n").trimEnd())
+  return blocks.filter((block) => block.trim()).map(formatTimelineBlock)
+}
+
+function parseEventBlocks(content) {
+  return String(content ?? "")
     .split(/\n(?=\{)/)
     .map((line) => line.trim())
     .filter(Boolean)
@@ -216,7 +246,27 @@ function formatDebugContent(kind, content) {
         return [`#${index + 1} | NDJSON inválido\n${truncateText(line, 1_600)}`]
       }
     })
-  return blocks.join("\n\n---\n\n")
+}
+
+function parseFallbackBlocks(content) {
+  return String(content ?? "")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+}
+
+function formatDebugBlocks(kind, content) {
+  const blocks = kind === "events"
+    ? parseEventBlocks(content)
+    : kind === "timeline"
+      ? parseTimelineBlocks(content)
+      : parseFallbackBlocks(content)
+
+  return blocks.reverse()
+}
+
+function formatDebugContent(kind, content) {
+  return formatDebugBlocks(kind, content).join("\n\n---\n\n")
 }
 
 function runTitle(run) {

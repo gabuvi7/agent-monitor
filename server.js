@@ -13,8 +13,11 @@ const PORT = Number(process.env.PORT ?? 4317)
 const HOST = "127.0.0.1"
 const ACTIVE_STATUSES = new Set(["running"])
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "timeout"])
-const KNOWN_STATUSES = new Set([...ACTIVE_STATUSES, ...TERMINAL_STATUSES, "unknown"])
+const STALE_STATUSES = new Set(["stale"])
+const KNOWN_STATUSES = new Set([...ACTIVE_STATUSES, ...TERMINAL_STATUSES, ...STALE_STATUSES, "unknown"])
 const MODEL_INFERENCE_WINDOW_MS = 5 * 60 * 1_000
+const RUN_RECONCILIATION_WINDOW_MS = 5_000
+const STALE_AMBIGUOUS_DELEGATE_MS = 30 * 60 * 1_000
 
 function readEnvFile(path) {
   try {
@@ -464,6 +467,24 @@ function normalizeStatus(value) {
   return "unknown"
 }
 
+function isAmbiguousBackgroundDelegate(record) {
+  return knownString(record.source) === "background.delegate"
+    && !knownString(record.delegationId)
+    && !knownString(record.childSessionId)
+}
+
+function staleAmbiguousDelegateReason(record, nowMs = Date.now()) {
+  if (normalizeStatus(record.status) !== "running") return null
+  if (!isAmbiguousBackgroundDelegate(record)) return null
+
+  const updated = timestampMs(record.updatedAt) ?? timestampMs(record.startedAt)
+  if (updated === null) return null
+
+  return nowMs - updated >= STALE_AMBIGUOUS_DELEGATE_MS
+    ? "stale_ambiguous_background_delegate_without_updates"
+    : null
+}
+
 function durationMs(record, nowMs = Date.now()) {
   if (typeof record.durationMs === "number" && Number.isFinite(record.durationMs)) {
     return Math.max(0, Math.round(record.durationMs))
@@ -493,6 +514,40 @@ function runMergeKey(record) {
       knownString(record.action) ?? "unknown-action",
       knownString(record.startedAt) ?? "unknown-start",
     ].join("|")
+}
+
+function normalizedMatchText(value) {
+  return knownString(value)?.replace(/\s+/g, " ").trim().toLowerCase() ?? null
+}
+
+function timeDistanceMs(left, right) {
+  const leftMs = timestampMs(left)
+  const rightMs = timestampMs(right)
+  if (leftMs === null || rightMs === null) return null
+  return Math.abs(leftMs - rightMs)
+}
+
+function sameLogicalNativeTaskStart(runningRecord, terminalRecord) {
+  if (normalizeStatus(runningRecord.status) !== "running") return false
+  if (!TERMINAL_STATUSES.has(normalizeStatus(terminalRecord.status))) return false
+  if (knownString(runningRecord.source) !== "native.task") return false
+  if (knownString(terminalRecord.source) !== "native.task") return false
+
+  const parentSessionId = knownString(runningRecord.parentSessionId)
+  if (!parentSessionId || parentSessionId !== knownString(terminalRecord.parentSessionId)) return false
+
+  const runningAgent = knownString(runningRecord.agent)
+  if (!runningAgent || runningAgent !== knownString(terminalRecord.agent)) return false
+
+  const runningAction = normalizedMatchText(runningRecord.action)
+  if (!runningAction || runningAction !== normalizedMatchText(terminalRecord.action)) return false
+
+  const startDistance = timeDistanceMs(runningRecord.startedAt, terminalRecord.startedAt)
+  return startDistance !== null && startDistance <= RUN_RECONCILIATION_WINDOW_MS
+}
+
+function matchingTerminalRecords(runningRecord, terminalRecords) {
+  return terminalRecords.filter((terminalRecord) => sameLogicalNativeTaskStart(runningRecord, terminalRecord))
 }
 
 function mergeValue(previous, next) {
@@ -536,11 +591,30 @@ function newestRecordPerRun(records) {
     const key = runMergeKey(record)
     runs.set(key, mergeRunRecord(runs.get(key), record))
   }
-  return [...runs.entries()].map(([key, record]) => ({ key, record }))
+  const entries = [...runs.entries()].map(([key, record]) => ({ key, record }))
+  const terminalRecords = entries
+    .map(({ record }) => record)
+    .filter((record) => TERMINAL_STATUSES.has(normalizeStatus(record.status)))
+  const runningRecords = entries
+    .map(({ record }) => record)
+    .filter((record) => normalizeStatus(record.status) === "running")
+
+  return entries.filter(({ record }) => {
+    if (normalizeStatus(record.status) !== "running") return true
+
+    const terminalMatches = matchingTerminalRecords(record, terminalRecords)
+    if (terminalMatches.length !== 1) return true
+
+    const runningMatches = runningRecords.filter((runningRecord) => (
+      sameLogicalNativeTaskStart(runningRecord, terminalMatches[0])
+    ))
+    return runningMatches.length !== 1
+  })
 }
 
 function normalizeRun(key, record, modelCandidates = [], nowMs = Date.now()) {
-  const status = normalizeStatus(record.status)
+  const staleReason = staleAmbiguousDelegateReason(record, nowMs)
+  const status = staleReason ? "stale" : normalizeStatus(record.status)
   const duration = durationMs({ ...record, status }, nowMs)
   const modelMetadata = inferModelMetadata(record, modelCandidates)
   const action = displayLabel(record.action, "Unavailable")
@@ -551,6 +625,8 @@ function normalizeRun(key, record, modelCandidates = [], nowMs = Date.now()) {
     status,
     isActive: ACTIVE_STATUSES.has(status),
     isTerminal: TERMINAL_STATUSES.has(status),
+    isStale: STALE_STATUSES.has(status),
+    staleReason,
     projectName: displayLabel(record.projectName),
     projectRoot: knownString(record.projectRoot),
     delegationId: knownString(record.delegationId),
@@ -594,7 +670,7 @@ function limitValue(value) {
 function filterRuns(runs, status) {
   if (status === "active") return runs.filter((run) => run.isActive)
   if (status === "all") return runs
-  return runs.filter((run) => run.isTerminal || run.status === "unknown")
+  return runs.filter((run) => run.isTerminal || run.isStale || run.status === "unknown")
 }
 
 function matchesRunKey(run, key) {
