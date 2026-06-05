@@ -67,6 +67,39 @@ El estado canónico del monitor sale de `subagent-runs.ndjson` a través de las 
 
 Por seguridad, el servidor escucha solo en `127.0.0.1`, no en toda la red local.
 
+### Línea compacta para statusline/tmux/zellij
+
+Para imprimir un resumen compacto del último proyecto con logs:
+
+```bash
+npm run statusline
+```
+
+Ejemplo de salida:
+
+```text
+🤖 active:0 recent:15 stale:1 · last: sdd-apply completed
+```
+
+También podés elegir proyecto o carpeta de logs explícitamente:
+
+```bash
+npm run statusline -- --project agent-monitor-20565965
+npm run statusline -- --log-root /tmp/agent-monitor-logs --project demo
+```
+
+El comando escribe por default `logs/<proyecto>/agent-monitor-summary.json` y luego imprime una sola línea apta para statuslines. Si solo querés imprimir sin actualizar el archivo:
+
+```bash
+npm run statusline -- --project agent-monitor-20565965 --no-write
+```
+
+Ejemplo para tmux:
+
+```tmux
+set -g status-right '#(node /path/to/agent-monitor/scripts/statusline-summary.js --project agent-monitor-20565965)'
+```
+
 ### Generar logs desde cualquier proyecto
 
 1. Abrí opencode desde cualquier proyecto:
@@ -94,6 +127,7 @@ Por seguridad, el servidor escucha solo en `127.0.0.1`, no en toda la red local.
 | Archivo | Para qué sirve |
 |---------|----------------|
 | `logs/<proyecto>-<hash>/subagent-runs.ndjson` | Contrato estructurado del monitor. Cada línea representa un registro `subagent.run` con estado, sesiones, agente, modelo cuando exista, tiempos, resultado y uso opcional. |
+| `logs/<proyecto>-<hash>/agent-monitor-summary.json` | Resumen compacto generado por `npm run statusline` o por la API de summary con `write=1`; incluye conteos active/recent/stale, metadata de la última ejecución y timestamp de actualización. |
 | `logs/<proyecto>-<hash>/subagent-timeline.md` | Línea de tiempo legible: inicio del observer, llamadas a herramientas y eventos relacionados con tareas/subagentes. |
 | `logs/<proyecto>-<hash>/opencode-events.ndjson` | Registro estructurado crudo para depurar con más detalle. Cada línea es un objeto JSON. |
 
@@ -116,6 +150,8 @@ El servidor expone endpoints sin caché para que la UI y futuros consumidores le
 | `GET /api/projects/:project/runs?status=recent&limit=50` | Devuelve ejecuciones terminales recientes: completadas, fallidas, canceladas, timeout o desconocidas. |
 | `GET /api/projects/:project/runs?status=all&limit=50` | Devuelve todas las ejecuciones normalizadas. |
 | `GET /api/projects/:project/runs/:key` | Busca un detalle por clave normalizada, delegation ID, sesión padre o sesión hija. |
+| `GET /api/projects/:project/summary` | Devuelve un resumen compacto con conteos `active`, `recent`, `stale`, total, última ejecución y `updatedAt`. No escribe archivos. |
+| `GET /api/projects/:project/summary?write=1` | Devuelve el mismo resumen y escribe `agent-monitor-summary.json` en la carpeta del proyecto. |
 | `GET /api/projects/:project/timeline` | Fallback/debug del timeline legible. No es fuente canónica del monitor. |
 | `GET /api/projects/:project/events` | Fallback/debug de eventos crudos. No es fuente canónica del monitor. |
 

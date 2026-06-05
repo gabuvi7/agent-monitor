@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "install-plugin": "node scripts/install-opencode-plugin.js",
+    "statusline": "node scripts/statusline-summary.js",
     "start": "node server.js"
   }
 }
